@@ -3,6 +3,8 @@ data/output/**
 data/output.*
 data/checkpoint
 data/*.txt
+.idea/
+.idea/**
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
