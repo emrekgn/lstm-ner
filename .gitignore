@@ -1,3 +1,9 @@
+data/output/
+data/output/**
+data/output.*
+data/checkpoint
+data/*.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
