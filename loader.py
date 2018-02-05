@@ -26,7 +26,9 @@ class DataLoader:
         self.train_data, self.dev_data, self.test_data = self._prepare_data()
         self.num_batches = (len(self.train_data) + self.batch_size - 1) // self.batch_size
         assert self.num_batches > 0
-        self.pointer = 0
+        self.num_dev_batches = (len(self.dev_data) + self.batch_size - 1) // self.batch_size
+        assert self.num_dev_batches > 0
+        self.tpointer, self.dpointer = 0, 0
 
     def _prepare_data(self):
         # Randomly shuffle sentences
@@ -77,9 +79,9 @@ class DataLoader:
         return new_words
 
     def reset_pointer(self):
-        self.pointer = 0
+        self.tpointer = 0
 
-    def next(self):
+    def next(self, which_data="train"):
         """
         Returns the next tweet.
         :return:
@@ -89,15 +91,25 @@ class DataLoader:
             [10, 0, 17, 0, 3, 5, 0, 4], [25, 0, 4], [15, 2], [8, 2, 7, 14, 2, 4, 2, 3], [19, 2, 9, 2, 3], [10, 0]]
         tags: <class 'list'>: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         """
-        min_incl = self.pointer * self.batch_size
-        max_excl = min(min_incl + self.batch_size, len(self.train_data))
-        batch = self.train_data[min_incl:max_excl]
         words, chars, tags = [], [], []
-        for data in batch:
-            words.append(data["words"])
-            chars.append(data["chars"])
-            tags.append(data["tags"])
-        self.pointer += 1
+        if which_data == "train":
+            min_incl = self.tpointer * self.batch_size
+            max_excl = min(min_incl + self.batch_size, len(self.train_data))
+            batch = self.train_data[min_incl:max_excl]
+            for data in batch:
+                words.append(data["words"])
+                chars.append(data["chars"])
+                tags.append(data["tags"])
+            self.tpointer += 1
+        elif which_data == "dev":
+            min_incl = self.dpointer * self.batch_size
+            max_excl = min(min_incl + self.batch_size, len(self.train_data))
+            batch = self.dev_data[min_incl:max_excl]
+            for data in batch:
+                words.append(data["words"])
+                chars.append(data["chars"])
+                tags.append(data["tags"])
+            self.dpointer += 1
         return words, chars, tags
 
     def _load_sentences(self, path, lower, zeros):

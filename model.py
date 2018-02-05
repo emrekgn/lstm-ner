@@ -5,6 +5,7 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
+import numpy as np
 
 
 class Model:
@@ -96,15 +97,19 @@ class Model:
             self.logits = tf.reshape(pred, [-1, nsteps, self.ntags])
 
         # Prediction (without CRF!)
-        self.tags_pred = tf.cast(tf.argmax(self.logits, axis=-1), tf.int32)
+        #self.tags_pred = tf.cast(tf.argmax(self.logits, axis=-1), tf.int32)
 
-        # TODO CRF!
+        # CRF
+        log_likelihood, trans_params = tf.contrib.crf.crf_log_likelihood(
+            self.logits, self.tags, self.sequence_lengths)
+        self.trans_params = trans_params  # need to evaluate it for decoding
+        self.loss = tf.reduce_mean(-log_likelihood)
 
         # Loss calculation
-        losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits, labels=self.tags)
-        mask = tf.sequence_mask(self.sequence_lengths)
-        losses = tf.boolean_mask(losses, mask)
-        self.loss = tf.reduce_mean(losses)
+        #losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits, labels=self.tags)
+        #mask = tf.sequence_mask(self.sequence_lengths)
+        #losses = tf.boolean_mask(losses, mask)
+        #self.loss = tf.reduce_mean(losses)
 
         tf.summary.scalar("loss", self.loss)
 
@@ -159,7 +164,7 @@ class Model:
             if batch_count % 10 == 0:
                 self.file_writer.add_summary(summary, epoch * self.data_loader.num_batches + batch_count)
 
-        metrics = self.run_evaluate(self.data_loader.dev_data)
+        metrics = self.run_evaluate()
         msg = " - ".join(["{} {:04.2f}".format(k, v)
                 for k, v in metrics.items()])
         print(msg)
@@ -189,33 +194,31 @@ class Model:
 
         return feed, sequence_lengths
 
-    def run_evaluate(self, test):
+    def run_evaluate(self):
         """Evaluates performance on test set
-
-        Args:
-            test: dataset that yields tuple of (sentences, tags)
 
         Returns:
             metrics: (dict) metrics["acc"] = 98.4, ...
-
+        """
 
         accs = []
         correct_preds, total_correct, total_preds = 0., 0., 0.
-        for words, labels in minibatches(test, self.args.batch_size):
-            labels_pred, sequence_lengths = self.predict_batch(words)
+        for batch_count in range(self.data_loader.num_dev_batches):
+            words, chars, tags = self.data_loader.next("dev")
+            tags_pred, sequence_lengths = self.predict_batch(words, chars)
 
-            for lab, lab_pred, length in zip(labels, labels_pred,
+            for tag, tag_pred, length in zip(tags, tags_pred,
                                              sequence_lengths):
-                lab      = lab[:length]
-                lab_pred = lab_pred[:length]
-                accs    += [a==b for (a, b) in zip(lab, lab_pred)]
+                tag = tag[:length]
+                tag_pred = tag_pred[:length]
+                accs += [a==b for (a, b) in zip(tag, tag_pred)]
 
-                lab_chunks      = set(get_chunks(lab, self.args.vocab_tags))
-                lab_pred_chunks = set(get_chunks(lab_pred,
-                                                 self.args.vocab_tags))
+                lab_chunks = set(self.get_chunks(tag, self.data_loader.tag_to_id))
+                lab_pred_chunks = set(self.get_chunks(tag_pred,
+                                                 self.data_loader.tag_to_id))
 
                 correct_preds += len(lab_chunks & lab_pred_chunks)
-                total_preds   += len(lab_pred_chunks)
+                total_preds += len(lab_pred_chunks)
                 total_correct += len(lab_chunks)
 
         p   = correct_preds / total_preds if correct_preds > 0 else 0
@@ -224,11 +227,70 @@ class Model:
         acc = np.mean(accs)
 
         return {"acc": 100*acc, "f1": 100*f1}
-        """
-        return {"acc": 1, "f1": 1}
 
-    def predict_batch(self, words):
-        # TODO
+    def get_chunks(self, seq, tags):
+        """Given a sequence of tags, group entities and their position
+
+        Args:
+            seq: [4, 4, 0, 0, ...] sequence of labels
+            tags: dict["O"] = 4
+
+        Returns:
+            list of (chunk_type, chunk_start, chunk_end)
+
+        Example:
+            seq = [4, 5, 0, 3]
+            tags = {"B-PER": 4, "I-PER": 5, "B-LOC": 3}
+            result = [("PER", 0, 2), ("LOC", 3, 4)]
+
+        """
+        default = tags[0]
+        idx_to_tag = {idx: tag for tag, idx in tags.items()}
+        chunks = []
+        chunk_type, chunk_start = None, None
+        for i, tok in enumerate(seq):
+            # End of a chunk 1
+            if tok == default and chunk_type is not None:
+                # Add a chunk.
+                chunk = (chunk_type, chunk_start, i)
+                chunks.append(chunk)
+                chunk_type, chunk_start = None, None
+
+            # End of a chunk + start of a chunk!
+            elif tok != default:
+                tok_chunk_class, tok_chunk_type = self.get_chunk_type(tok, idx_to_tag)
+                if chunk_type is None:
+                    chunk_type, chunk_start = tok_chunk_type, i
+                elif tok_chunk_type != chunk_type or tok_chunk_class == "B":
+                    chunk = (chunk_type, chunk_start, i)
+                    chunks.append(chunk)
+                    chunk_type, chunk_start = tok_chunk_type, i
+            else:
+                pass
+
+        # end condition
+        if chunk_type is not None:
+            chunk = (chunk_type, chunk_start, len(seq))
+            chunks.append(chunk)
+
+        return chunks
+
+    def get_chunk_type(self, tok, idx_to_tag):
+        """
+        Args:
+            tok: id of token, ex 4
+            idx_to_tag: dictionary {4: "B-PER", ...}
+
+        Returns:
+            tuple: "B", "PER"
+
+        """
+        tag_name = idx_to_tag[tok]
+        tag_class = tag_name.split('-')[0]
+        tag_type = tag_name.split('-')[-1]
+        return tag_class, tag_type
+
+    def predict_batch(self, words, chars):
         """
         Args:
             words: list of sentences
@@ -236,30 +298,21 @@ class Model:
         Returns:
             labels_pred: list of labels for each sentence
             sequence_length
-
-
-        fd, sequence_lengths = self.get_feed_dict(words, dropout=1.0)
-
-        if self.config.use_crf:
-            # get tag scores and transition params of CRF
-            viterbi_sequences = []
-            logits, trans_params = self.sess.run(
-                    [self.logits, self.trans_params], feed_dict=fd)
-
-            # iterate over the sentences because no batching in vitervi_decode
-            for logit, sequence_length in zip(logits, sequence_lengths):
-                logit = logit[:sequence_length] # keep only the valid steps
-                viterbi_seq, viterbi_score = tf.contrib.crf.viterbi_decode(
-                        logit, trans_params)
-                viterbi_sequences += [viterbi_seq]
-
-            return viterbi_sequences, sequence_lengths
-
-        else:
-            labels_pred = self.sess.run(self.labels_pred, feed_dict=fd)
-
-            return labels_pred, sequence_lengths
         """
+        fd, sequence_lengths = self.get_feed_dict(words, chars, dropout=1.0)
+        # get tag scores and transition params of CRF
+        viterbi_sequences = []
+        logits, trans_params = self.sess.run(
+                [self.logits, self.trans_params], feed_dict=fd)
+
+        # iterate over the sentences because no batching in viterbi_decode
+        for logit, sequence_length in zip(logits, sequence_lengths):
+            logit = logit[:sequence_length] # keep only the valid steps
+            viterbi_seq, viterbi_score = tf.contrib.crf.viterbi_decode(
+                    logit, trans_params)
+            viterbi_sequences += [viterbi_seq]
+
+        return viterbi_sequences, sequence_lengths
 
     def save_session(self, path):
         """Save session, weights"""
