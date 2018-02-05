@@ -78,8 +78,11 @@ class DataLoader:
                 new_words.append(word)
         return new_words
 
-    def reset_pointer(self):
-        self.tpointer = 0
+    def reset_pointer(self, which="train"):
+        if which == "train":
+            self.tpointer = 0
+        elif which == "dev":
+            self.dpointer = 0
 
     def next(self, which_data="train"):
         """
