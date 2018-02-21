@@ -38,11 +38,17 @@ class Model:
 
         # Pre-trained word embeddings
         with tf.variable_scope("words"):
-            # TODO currently, randomly generated. use pretrained word embeddings instead!
-            _word_embeddings = tf.get_variable(
+            if self.args.pre_emb is None:
+                _word_embeddings = tf.get_variable(
+                        name="_word_embeddings",
+                        dtype=tf.float32,
+                        shape=[self.nwords, self.args.dim_word])
+            else:
+                _word_embeddings = tf.Variable(
+                    self.data_loader.embeddings,
                     name="_word_embeddings",
                     dtype=tf.float32,
-                    shape=[self.nwords, self.args.dim_word])
+                    trainable=False)
             word_embeddings = tf.nn.embedding_lookup(_word_embeddings, self.word_ids, name="word_embeddings")
 
         # Char embeddings

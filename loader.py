@@ -10,8 +10,10 @@ import numpy as np
 
 
 class DataLoader:
-    def __init__(self, path="data/input.txt", batch_size=5, lower=False, zeros=True, split_by='80,10,10'):
+    def __init__(self, path="data/input.txt", word_dim=300, pre_emb="data/pretrained.txt", batch_size=5, lower=False, zeros=True, split_by='80,10,10'):
         self.path = path
+        self.word_dim = word_dim
+        self.pre_emb = pre_emb
         self.batch_size = batch_size
         self.lower = lower
         self.zeros = zeros
@@ -19,7 +21,7 @@ class DataLoader:
 
         self.sentences = self._load_sentences(path, lower, zeros)
         self.num_sentences = len(self.sentences)
-        self.word_to_id, self.id_to_word, self.singletons, self.word_vocab_size = self._word_mapping(self.sentences)
+        self.dico_words, self.word_to_id, self.id_to_word, self.singletons, self.word_vocab_size = self._word_mapping(self.sentences)
         self.char_to_id, self.id_to_char, self.char_vocab_size = self._char_mapping(self.sentences)
         self.tag_to_id, self.id_to_tag, self.tag_vocab_size = self._tag_mapping(self.sentences)
 
@@ -29,6 +31,9 @@ class DataLoader:
         self.num_dev_batches = (len(self.dev_data) + self.batch_size - 1) // self.batch_size
         assert self.num_dev_batches > 0
         self.tpointer, self.dpointer = 0, 0
+
+        # Load pretrained embeddings
+        self.word_to_id, self.id_to_word, self.word_vocab_size, self.embeddings = self._load_embeddings(self.dico_words, self.pre_emb, self.word_dim)
 
     def _prepare_data(self):
         # Randomly shuffle sentences
@@ -156,7 +161,7 @@ class DataLoader:
             len(dico), sum(len(x) for x in words)
         ))
         print("Number of singletons found: %i" % len(singletons))
-        return word_to_id, id_to_word, singletons, len(dico)
+        return dico, word_to_id, id_to_word, singletons, len(dico)
 
     def _char_mapping(self, sentences):
         """
@@ -210,3 +215,62 @@ class DataLoader:
         Replace every digit in a string by a zero.
         """
         return re.sub('\d', '0', s)
+
+    def _load_embeddings(self, dico_words, emb_path, word_dim):
+        """
+        Args:
+            filename: path to the npz file
+
+        Returns:
+            matrix of embeddings (np array)
+
+        """
+        word_to_embedding = {}
+        emb_invalid = 0
+        for i,line in enumerate(codecs.open(emb_path, 'r', 'utf-8')):
+            line = line.rstrip()
+            if not line: # skip empty string
+                continue
+            line = line.split()
+            assert len(line) > 1
+            word = line[0].strip()
+            if len(line) == word_dim+1:
+                word_to_embedding[word] = np.array([float(x) for x in line[1:]]).astype(np.float32)
+                if word not in dico_words:
+                    dico_words[word] = 0
+            else:
+                emb_invalid += 1
+        if emb_invalid > 0:
+            print('WARNING: {} invalid embeddings.'.format(emb_invalid))
+
+        word_to_id, id_to_word = self._create_mapping(dico_words)
+        # Randomly generate embeddings
+        n_words = len(dico_words)
+        shape = (n_words, word_dim)
+        drange = np.sqrt(6. / (np.sum(shape)))
+        weights = drange * np.random.uniform(low=-1.0, high=1.0, size=shape).astype(np.float32)
+        c_found, c_lower, c_zeros = 0, 0, 0
+        for i in range(n_words):
+            word = id_to_word[i]
+            if word in word_to_embedding:
+                weights[i] = word_to_embedding[word]
+                c_found += 1
+            elif word.lower() in word_to_embedding:
+                weights[i] = word_to_embedding[word.lower()]
+                c_lower += 1
+            elif re.sub('\d', '0', word.lower()) in word_to_embedding:
+                weights[i] = word_to_embedding[
+                    re.sub('\d', '0', word.lower())
+                ]
+                c_zeros += 1
+        print('Loaded {} pretrained embeddings.'.format(len(word_to_embedding)))
+        print('%i / %i (%.4f%%) words have been initialized with '
+              'pretrained embeddings.') % (
+            c_found + c_lower + c_zeros, n_words,
+            100. * (c_found + c_lower + c_zeros) / n_words
+        )
+        print('%i found directly, %i after lowercasing, '
+              '%i after lowercasing + zero.') % (
+            c_found, c_lower, c_zeros
+        )
+        return word_to_id, id_to_word, len(dico_words), weights
