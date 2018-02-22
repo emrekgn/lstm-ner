@@ -10,7 +10,7 @@ import numpy as np
 
 
 class DataLoader:
-    def __init__(self, path="data/input.txt", word_dim=300, pre_emb="data/pretrained.txt", batch_size=5, lower=False, zeros=True, split_by='80,10,10'):
+    def __init__(self, path, pre_emb, word_dim=300, batch_size=5, lower=False, zeros=True, split_by='80,10,10'):
         self.path = path
         self.word_dim = word_dim
         self.pre_emb = pre_emb
@@ -33,7 +33,8 @@ class DataLoader:
         self.tpointer, self.dpointer = 0, 0
 
         # Load pretrained embeddings
-        self.word_to_id, self.id_to_word, self.word_vocab_size, self.embeddings = self._load_embeddings(self.dico_words, self.pre_emb, self.word_dim)
+        if self.pre_emb:
+            self.word_to_id, self.id_to_word, self.word_vocab_size, self.embeddings = self._load_embeddings(self.dico_words, self.pre_emb, self.word_dim)
 
     def _prepare_data(self):
         # Randomly shuffle sentences

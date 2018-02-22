@@ -13,7 +13,7 @@ from six.moves import cPickle
 
 def main(args):
     # Load input file, prepare training and validation sets
-    data_loader = DataLoader(args.input, args.dim_word, args.pre_emb, args.batch_size, args.lowercase, args.zeros)
+    data_loader = DataLoader(args.input, args.pre_emb, args.dim_word, args.batch_size, args.lowercase, args.zeros)
 
     # Save vocabularies
     with open(os.path.join(args.output, 'words_vocab.pkl'), 'wb') as f:
@@ -66,7 +66,6 @@ if __name__ == "__main__":
         help='Output location. Used to save model config/params and logs.')
     parser.add_argument(
         '--pre_emb',
-        default='data/pretrained.txt',
         help='Pretrained embeddings location.')
     parser.add_argument(
         '--save_every',
